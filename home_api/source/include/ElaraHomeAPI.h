@@ -43,12 +43,12 @@
 
 #define EH_API EH_EXTERN EH_XAPI
 
-
+#include <string.h>
 
 /* Data types */
-#ifndef uint_t
-#	define unsigned int uint_t;
-#endif
+//#ifndef uint_t
+	typedef unsigned int uint_t;
+//#endif
 
 typedef float EH_RGB[3];
 typedef float EH_RGBA[4];
@@ -134,7 +134,7 @@ EH_API void EH_begin_export(EH_Context *ctx, const char *filename, const EH_Expo
 /** End exporting, clean up resources only valid during 
  * the exporting process.
  */
-EH_API void EH_end_export();
+EH_API void EH_end_export(EH_Context *ctx);
 
 
 /** The callback to log messages during exporting.
@@ -178,6 +178,17 @@ struct EH_Camera
 	uint_t image_height;
 	EH_Mat view_to_world;	/**< View to world transform matrix */
 	bool cubemap_render;	/**< Render a 6x1 cubemap? */
+
+	EH_Camera() :
+		fov(0.0f),
+		near_clip(0.0f),
+		far_clip(0.0f),
+		image_width(0),
+		image_height(0),
+		cubemap_render(false)
+	{
+		memset(view_to_world, 0, sizeof(view_to_world));
+	}
 };
 
 /** Set current camera to render.
@@ -192,10 +203,21 @@ struct EH_Mesh
 {
 	uint_t num_verts;
 	uint_t num_faces;
-	const EH_Vec *verts;
-	const EH_Vec *normals;
-	const EH_Vec2 *uvs;
-	const uint_t *face_indices;		/** Should have (num_faces * 3) indices */
+	EH_Vec *verts;
+	EH_Vec *normals;
+	EH_Vec2 *uvs;
+	uint_t *face_indices;		/** Should have (num_faces * 3) indices */
+
+	EH_Mesh() :
+		num_verts(0),
+		num_faces(0),
+		verts(NULL),
+		normals(NULL),
+		uvs(NULL),
+		face_indices(NULL)
+	{
+
+	}
 };
 
 /** Add a triangle mesh to the scene.
@@ -206,6 +228,21 @@ EH_API void EH_add_mesh(EH_Context *ctx, const char *name, const EH_Mesh *mesh);
 
 
 
+/** The texture to be connected to material.
+ */
+struct EH_Texture
+{
+	const char *filename;	/**< The image filename */
+	float repeat;			/**< The repeat scale */
+
+	EH_Texture() :
+		filename(NULL),
+		repeat(1.0f)
+	{
+
+	}
+};
+
 /** The material data for user to fill
  */
 struct EH_Material
@@ -215,16 +252,14 @@ struct EH_Material
 	/* Diffuse layer */
 	float diffuse_weight;
 	EH_RGB diffuse_color;		/**< Diffuse color */
-	const char *diffuse_tex;	/**< The filename of diffuse texture */
-	float diffuse_tex_repeat;	/**< The repeat scale of diffuse texture */
+	EH_Texture diffuse_tex;		/**< Diffuse texture */
 	float roughness;
 	float backlight;
 
 	/* Specular layer */
 	float specular_weight;
-	EH_RGB specular_color;	/**< Specular color */
-	const char *specular_tex;	/**< The filename of specular texture */
-	float specular_tex_repeat;	/**< The repeat scale of specular texture */
+	EH_RGB specular_color;		/**< Specular color */
+	EH_Texture specular_tex;	/**< Specular texture */
 	float glossiness;
 	float specular_fresnel;
 	float anisotropy;
@@ -233,16 +268,14 @@ struct EH_Material
 	/* Transparency layer */
 	float transp_weight;		/**< Transparency weight */
 	bool transp_invert_weight;
-	const char *transp_tex;		/**< The filename of transparency texture */
-	float transp_tex_repeat;	/**< The repeat scale of transparency texture */
+	EH_Texture transp_tex;		/**< Transparency texture */
 
 	/* Bump mapping */
 	float bump_weight;
-	const char *bump_tex;		/**< The texture for bump mapping */
-	float bump_tex_repeat;		/**< The repeat scale of bump texture */
+	EH_Texture bump_tex;		/**< The texture for bump mapping */
 	bool normal_bump;			/**< The bump texture is actually a normal map? */
 
-	/* Mirror layer */
+	/* Mirror layer */			/**< Mirror not used */
 	float mirror_weight;
 	EH_RGB mirror_color;
 	float mirror_fresnel;
@@ -253,6 +286,35 @@ struct EH_Material
 	EH_RGB refract_color;
 	float ior;
 	float refract_glossiness;
+
+	EH_Material() :
+		backface_cull(true),
+		diffuse_weight(0.0f),
+		roughness(0.0f),
+		backlight(0.0f),
+		specular_weight(0.0f),
+		glossiness(0.0f),
+		specular_fresnel(0.0f),
+		anisotropy(1.0f),
+		rotation(0.0f),
+		transp_weight(0.0f),
+		transp_invert_weight(false),
+		bump_weight(0.0f),
+		normal_bump(false),
+		mirror_weight(0.0f),
+		mirror_fresnel(0.0f),
+		refract_weight(0.0f),
+		refract_invert_weight(false),
+		ior(1.5f),
+		refract_glossiness(0.0f)
+	{
+		memset(&diffuse_color, 0, sizeof(diffuse_color));		
+		memset(&specular_color, 0, sizeof(specular_color));
+		memset(&mirror_color, 0, sizeof(mirror_color));
+		memset(&refract_color, 0, sizeof(refract_color));
+
+		diffuse_color[0] = 1.0f; /* default diffuse color is red */
+	}
 };
 
 /** Add a material to the scene.
@@ -280,6 +342,24 @@ EH_API void EH_add_mesh_instance(EH_Context *ctx, const char *name, const EH_Mes
 
 
 
+/** The instance of an assembly.
+ * An assembly is an ESS file exported before hand. You can import its 
+ * content into current scene later using assembly instance.
+ */
+struct EH_AssemblyInstance
+{
+	const char *filename;	/**< The name of the ESS file to import */
+	EH_Mat mesh_to_world;	/**< Assembly local space to world space transform */
+};
+
+/** Instance an assembly into the scene.
+ * \param name The name of the assembly instance
+ * \param The assembly instance data
+ */
+EH_API void EH_add_assembly_instance(EH_Context *ctx, const char *name, const EH_AssemblyInstance *inst);
+
+
+
 /** The light data for user to fill
  */
 struct EH_Light
@@ -291,6 +371,14 @@ struct EH_Light
 									 Use size[0] as width and use size[0] as 
 									 height for quad light */
 	EH_Mat light_to_world;		/**< Light local space to world space transform */
+
+	EH_Light() :
+		ies_filename(0),
+		type(EH_LIGHT_SPHERE)
+	{
+		memset(size, 0, sizeof(EH_Vec2));
+		memset(light_to_world, 0, sizeof(light_to_world));
+	}
 };
 
 /** Add a light to the scene.
@@ -333,3 +421,14 @@ struct EH_Sun
  */
 EH_API void EH_set_sun(EH_Context *ctx, const EH_Sun *sun);
 
+/** The callback to color buffer during rendering.
+ */
+typedef void (*EH_display_callback)(uint_t width, uint_t height, const EH_RGBA *color_data);
+
+/** Set display callback
+ */
+EH_API void EH_set_display_callback(EH_Context *ctx, EH_display_callback cb);
+
+/** Start rendering
+*/
+EH_API bool EH_start_render(EH_Context *ctx, const char *ess_name, bool is_interactive);
